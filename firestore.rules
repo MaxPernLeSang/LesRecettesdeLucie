@@ -1,0 +1,18 @@
+rules_version = '2';
+// À copier dans la console Firebase > Firestore Database > Règles, puis « Publier ».
+// Remplacez les deux adresses par les comptes Google autorisés (en minuscules).
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function autorise() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email.lower() in [
+          'adresse.de.max@gmail.com',
+          'adresse.de.lucie@gmail.com'
+        ];
+    }
+    match /{document=**} {
+      allow read, write: if autorise();
+    }
+  }
+}
