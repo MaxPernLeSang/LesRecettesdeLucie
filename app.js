@@ -525,7 +525,7 @@
   // ---------- Routage ----------
   function currentId() {
     var h = decodeURIComponent(location.hash.slice(1));
-    return h && h !== 'nouvelle' && h !== 'sauvegarde' && h !== 'ranger' && h.indexOf('modifier~') !== 0 ? h : '';
+    return h && h !== 'nouvelle' && h !== 'sauvegarde' && h !== 'ranger' && h !== 'acces' && h.indexOf('modifier~') !== 0 ? h : '';
   }
   function route() {
     var h = decodeURIComponent(location.hash.slice(1));
@@ -534,11 +534,12 @@
     if (h === 'nouvelle') renderEditor(null);
     else if (h.indexOf('modifier~') === 0) renderEditor(getRecipe(h.slice(9)));
     else if (h === 'sauvegarde') renderBackup();
+    else if (h === 'acces' && access.api) renderAccess();
     else if (h === 'ranger') renderOrganizer();
     else if (h && getRecipe(h)) renderRecipe(getRecipe(h));
     else renderWelcome();
     $app.classList.toggle('organizing', h === 'ranger');
-    $app.classList.toggle('reading', h === 'nouvelle' || h === 'sauvegarde' || h === 'ranger' || h.indexOf('modifier~') === 0 || !!(h && getRecipe(h)));
+    $app.classList.toggle('reading', h === 'nouvelle' || h === 'sauvegarde' || h === 'acces' || h === 'ranger' || h.indexOf('modifier~') === 0 || !!(h && getRecipe(h)));
     renderList();
     window.scrollTo(0, 0);
   }
@@ -1587,7 +1588,89 @@
     file.className = 'visually-hidden';
   }
 
+  // ---------- Accès (administrateur seulement) ----------
+  // Les personnes qui se connectent avec un compte Google inconnu apparaissent ici ;
+  // l'administrateur les autorise, les refuse ou leur retire l'accès.
+  var access = { api: window.RL_ADMIN || null, list: [], link: null };
+  function accessSetup() {
+    if (!access.api) return;
+    var badge = el('span', { class: 'badge', hidden: true });
+    access.link = el('a', { class: 'btn ghost', href: '#acces' }, ['Accès', badge]);
+    document.querySelector('.index-foot').appendChild(access.link);
+    access.api.watch(function (list) {
+      access.list = list;
+      var n = list.filter(function (m) { return m.statut === 'attente'; }).length;
+      badge.textContent = n; badge.hidden = !n;
+      if (location.hash === '#acces') renderAccessInto();
+    });
+  }
+  var nfDate = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+  function accessDo(p, msg) {
+    p.then(function () { toast(msg); }, function (e) { warn('Pas enregistré : ' + ((e && e.code) || 'erreur') + '.'); });
+  }
+  function personRow(m, actions) {
+    return el('li', null, [
+      el('span', { class: 'who' }, [
+        el('span', { text: m.nom || m.email }),
+        m.nom ? el('span', { class: 'mail', text: m.email }) : null,
+        m.demandeLe && m.statut === 'attente' ? el('span', { class: 'mail', text: 'Demande du ' + nfDate.format(m.demandeLe) }) : null
+      ]),
+      el('span', { class: 'acts' }, actions)
+    ]);
+  }
+  function renderAccess() {
+    access.box = el('div', { class: 'panel access' });
+    $main.appendChild(access.box);
+    renderAccessInto();
+  }
+  function renderAccessInto() {
+    var box = access.box; if (!box || !box.isConnected) return;
+    var api = access.api, L = access.list;
+    var by = function (st) { return L.filter(function (m) { return m.statut === st && api.toujours.indexOf(m.email) === -1; }); };
+    var wait = by('attente'), ok = by('autorise'), no = by('refuse');
+    var input = el('input', { type: 'email', class: 'search', id: 'acc-mail', placeholder: 'adresse@gmail.com', autocomplete: 'off' });
+    box.textContent = '';
+    [
+      backLink(),
+      el('h2', { text: 'Accès' }),
+      el('p', { text: 'Quand quelqu\u2019un se connecte avec un compte Google qui n\u2019est pas encore autorisé, sa demande arrive ici. Il voit les recettes seulement après votre accord.' }),
+      el('h2', { text: 'Demandes en attente' }),
+      wait.length ? el('ul', { class: 'restore' }, wait.map(function (m) {
+        return personRow(m, [
+          el('button', { type: 'button', class: 'btn', text: 'Autoriser', onclick: function () { accessDo(api.set(m.email, 'autorise'), m.email + ' peut maintenant ouvrir les recettes'); } }),
+          el('button', { type: 'button', class: 'btn danger', text: 'Refuser', onclick: function () { accessDo(api.set(m.email, 'refuse'), 'Demande refusée'); } })
+        ]);
+      })) : el('p', { class: 'muted', text: 'Aucune demande pour l\u2019instant.' }),
+      el('h2', { text: 'Comptes autorisés' }),
+      el('ul', { class: 'restore' }, api.toujours.map(function (mail) {
+        return personRow({ email: mail }, [el('span', { class: 'mail', text: 'toujours autorisé' })]);
+      }).concat(ok.map(function (m) {
+        return personRow(m, [
+          el('button', { type: 'button', class: 'btn ghost', text: 'Retirer l\u2019accès', onclick: function () { accessDo(api.set(m.email, 'refuse'), 'Accès retiré à ' + m.email); } })
+        ]);
+      }))),
+      no.length ? el('h2', { text: 'Refusés' }) : null,
+      no.length ? el('ul', { class: 'restore' }, no.map(function (m) {
+        return personRow(m, [
+          el('button', { type: 'button', class: 'btn ghost', text: 'Autoriser', onclick: function () { accessDo(api.set(m.email, 'autorise'), m.email + ' peut maintenant ouvrir les recettes'); } }),
+          el('button', { type: 'button', class: 'btn ghost', text: 'Oublier', onclick: function () { accessDo(api.remove(m.email), 'Demande effacée : cette personne pourra en refaire une'); } })
+        ]);
+      })) : null,
+      el('h2', { text: 'Autoriser une adresse à l\u2019avance' }),
+      el('label', { class: 'visually-hidden', for: 'acc-mail', text: 'Adresse Gmail à autoriser' }),
+      input,
+      el('div', { class: 'ed-actions' }, [
+        el('button', { type: 'button', class: 'btn', text: 'Autoriser cette adresse', onclick: function () {
+          var v = input.value.trim().toLowerCase();
+          if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) { warn('Adresse e-mail invalide.'); return; }
+          accessDo(api.set(v, 'autorise'), v + ' est autorisé');
+        } })
+      ])
+    ].forEach(function (n) { if (n) box.appendChild(n); });
+  }
+
   renderCats();
+  accessSetup();
   route();
   connectDb();
 })();

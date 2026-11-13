@@ -11,12 +11,14 @@ import {
 } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
 import {
   initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager,
-  doc, collection, setDoc, deleteDoc, getDoc, getDocs, getDocsFromCache, onSnapshot, writeBatch,
+  doc, collection, setDoc, deleteDoc, getDoc, getDocs, getDocsFromCache, onSnapshot, serverTimestamp,
   terminate, clearIndexedDbPersistence, connectFirestoreEmulator
 } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 import { firebaseConfig } from './firebase-config.js';
 
 const card = document.getElementById('gate-card');
+// Affichage seulement : la vraie liste est dans les règles Firestore (firestore.rules).
+const TOUJOURS = ['maxime.perigny.50@gmail.com', 'lemoinedu80@gmail.com'];
 const STORE_KEY = 'recettes-lucie-v1';
 
 // ---------- Petits outils d'affichage ----------
@@ -110,15 +112,64 @@ async function logout() {
   try { await terminate(db); await clearIndexedDbPersistence(db); } catch (e) {}
   location.reload();
 }
-function denied(user) {
+function otherAccount() {
+  return googleButton('Utiliser un autre compte Google', async () => {
+    try { await signOut(auth); } catch (e) {}
+    login(true);
+  });
+}
+// Compte inconnu : on enregistre (une fois) une demande d'accès, puis on attend la décision.
+let waitStop = null;
+async function denied(user) {
+  const mail = (user.email || '').toLowerCase();
+  const ref = doc(db, 'membres', mail);
+  let snap = null;
+  try { snap = await getDoc(ref); } catch (e) { snap = null; }
+  if (snap && !snap.exists()) {
+    try {
+      await setDoc(ref, { email: mail, nom: user.displayName || '', photo: user.photoURL || '', statut: 'attente', demandeLe: serverTimestamp() });
+      snap = await getDoc(ref);
+    } catch (e) { console.warn('Demande d\u2019accès impossible', e); }
+  }
+  const statut = snap && snap.exists() ? snap.data().statut : '';
+  if (statut === 'refuse') {
+    return show(say('Le compte ' + mail + ' n\u2019a pas accès à ces recettes.', 'err'), otherAccount());
+  }
   show(
-    say('Le compte ' + (user.email || 'Google') + ' n’a pas accès à ces recettes.', 'err'),
-    say('Choisissez le compte Google de Lucie ou de Max.'),
-    googleButton('Utiliser un autre compte Google', async () => {
-      try { await signOut(auth); } catch (e) {}
-      login(true);
-    })
+    say('Demande d\u2019accès envoyée pour ' + mail + '.'),
+    say('Max doit l\u2019accepter. Cette page s\u2019ouvrira toute seule dès que c\u2019est fait.', 'small'),
+    otherAccount()
   );
+  if (!waitStop && snap) {
+    waitStop = onSnapshot(ref, (s) => {
+      const st = s.exists() ? s.data().statut : '';
+      if (st === 'autorise') location.reload();
+      else if (st === 'refuse') { waitStop(); waitStop = null; denied(user); }
+    }, () => {});
+  }
+}
+
+// ---------- Gestion des accès (administrateur) ----------
+function adminApi() {
+  const ref = collection(db, 'membres');
+  return {
+    toujours: TOUJOURS.slice(),
+    watch(cb) {
+      return onSnapshot(ref, (q) => cb(q.docs.map((d) => {
+        const x = d.data();
+        const t = x.demandeLe && x.demandeLe.toDate ? x.demandeLe.toDate() : null;
+        return { email: d.id, nom: x.nom || '', statut: x.statut || 'attente', demandeLe: t };
+      })), (e) => console.warn(e));
+    },
+    set(mail, statut) {
+      mail = String(mail || '').trim().toLowerCase();
+      return setDoc(doc(db, 'membres', mail), { email: mail, statut }, { merge: true });
+    },
+    remove(mail) { return deleteDoc(doc(db, 'membres', mail)); }
+  };
+}
+async function checkAdmin() {
+  try { await getDocs(collection(db, 'membres')); return true; } catch (e) { return false; }
 }
 
 // ---------- Recettes ----------
@@ -206,6 +257,7 @@ async function start(user) {
   window.RECETTES = recettes;
   window.RL_DB = RL_DB;
   window.RL_USER = { email: user.email, signOut: logout };
+  if (await checkAdmin()) window.RL_ADMIN = adminApi();
   started = true;
   document.getElementById('gate').hidden = true;
   document.getElementById('app').hidden = false;

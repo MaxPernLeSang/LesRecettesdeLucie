@@ -1,18 +1,41 @@
 rules_version = '2';
 // À copier dans la console Firebase > Firestore Database > Règles, puis « Publier ».
-// Remplacez les deux adresses par les comptes Google autorisés (en minuscules).
+// ADMINS : peuvent tout faire, et valider ou refuser les demandes d'accès (onglet « Accès » du site).
+// TOUJOURS : comptes toujours autorisés, même si personne ne les a validés.
+// Les autres comptes Google envoient une demande en se connectant ; ils n'ont accès qu'une fois autorisés.
 service cloud.firestore {
   match /databases/{database}/documents {
-    function autorise() {
-      return request.auth != null
-        && request.auth.token.email_verified == true
-        && request.auth.token.email.lower() in [
-          'adresse.de.max@gmail.com',
-          'adresse.de.lucie@gmail.com'
-        ];
+    function connecte() {
+      return request.auth != null && request.auth.token.email_verified == true;
     }
-    match /{document=**} {
-      allow read, write: if autorise();
+    function moi() {
+      return request.auth.token.email.lower();
+    }
+    function estAdmin() {
+      return connecte() && moi() in ['maxime.perigny.50@gmail.com'];
+    }
+    function autorise() {
+      return connecte() && (
+        estAdmin()
+        || moi() in ['lemoinedu80@gmail.com']
+        || get(/databases/$(database)/documents/membres/$(moi())).data.statut == 'autorise'
+      );
+    }
+
+    // Recettes, dossiers : réservés aux comptes autorisés.
+    match /base/{id} { allow read, write: if autorise(); }
+    match /recettes/{id} { allow read, write: if autorise(); }
+    match /site/{id} { allow read, write: if autorise(); }
+
+    // Demandes d'accès : une fiche par adresse e-mail.
+    match /membres/{mail} {
+      allow read: if estAdmin() || (connecte() && moi() == mail);
+      allow create: if estAdmin() || (
+        connecte() && moi() == mail
+        && request.resource.data.statut == 'attente'
+        && request.resource.data.keys().hasOnly(['email', 'nom', 'photo', 'statut', 'demandeLe'])
+      );
+      allow update, delete: if estAdmin();
     }
   }
 }

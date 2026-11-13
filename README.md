@@ -51,8 +51,12 @@ maxpernlesang.github.io
    `adresse.de.max@gmail.com` et `adresse.de.lucie@gmail.com` par vos deux adresses Gmail
    (en minuscules). Cliquer sur **Publier**.
 
-C'est cette liste qui décide qui a accès. Pour ajouter ou retirer quelqu'un plus tard, il suffit de
-modifier ces deux lignes et de republier les règles.
+Dans les règles, `ADMINS` (Max) gère les accès et `TOUJOURS` (Lucie) est toujours autorisée.
+
+**Nouvelles personnes :** quelqu'un qui se connecte avec un autre compte Google envoie une demande
+d'accès. Elle apparaît chez Max dans l'onglet **Accès** du site (avec une pastille), où il peut
+**Autoriser**, **Refuser**, **Retirer l'accès** plus tard, ou autoriser une adresse à l'avance.
+Une personne refusée ne voit aucune recette : c'est la base elle-même qui refuse.
 
 ## 6. Publier sur GitHub Pages
 
